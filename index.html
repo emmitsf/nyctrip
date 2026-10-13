@@ -420,8 +420,8 @@ function select(id){
 // ---- added spots ----
 // To share added spots with everyone, paste your Supabase project's URL and anon key here (see README).
 // Left blank, added spots are saved in this browser only.
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://tmssukgomdnupzjtspqh.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_qkhc3_BTchbYLnHbPoAhrQ_b7f-pNWz";
 const SHARED = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 const LOCAL_KEY = "nycspots.added";
 const localRows = ()=>{ try{ return JSON.parse(localStorage.getItem(LOCAL_KEY)||"[]"); }catch(e){ return []; } };
