@@ -214,6 +214,7 @@ select{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);
       </div>
       <label class="fld"><span>Area</span><input name="a" maxlength="60" list="dl-area" placeholder="Filled in from the pin"></label>
       <label class="fld"><span>Note</span><input name="note" maxlength="300" placeholder="Why go, what to order, cost"></label>
+      <label class="fld"><span>Video (optional)</span><input name="vid" type="url" inputmode="url" maxlength="500" placeholder="Instagram, YouTube or TikTok link"></label>
       <label class="fld"><span>Your name (optional)</span><input name="by" maxlength="40"></label>
       <div class="pp-a"><button class="btn pri" type="submit" id="save">Save spot</button><button class="btn" type="button" id="cancel">Cancel</button></div>
       <p class="share-note" id="shareNote"></p>
@@ -240,6 +241,15 @@ const mins = mi => Math.max(1,Math.round(mi/3*60));
 const dist = mi => mi<1 ? Math.max(50,Math.round(mi*5280/50)*50).toLocaleString("en-US")+" ft" : mi.toFixed(1)+" mi";
 // Apple Maps opens the Maps app on iPhone/Mac and maps.apple.com elsewhere; q labels the pin at ll.
 const appleUrl = s => `https://maps.apple.com/?q=${encodeURIComponent(s.n)}&ll=${s.lat},${s.lng}`;
+// The video sites people can link from the add form; anything else isn't accepted there.
+function videoSite(u){
+  try{ const x=new URL(u); if(x.protocol!=="https:") return null; const h=x.hostname.toLowerCase();
+    if(/(^|\.)tiktok\.com$/.test(h)) return "TikTok";
+    if(h==="youtu.be"||/(^|\.)youtube\.com$/.test(h)) return "YouTube";
+    if(/(^|\.)instagram\.com$/.test(h)) return "Instagram";
+  }catch(e){}
+  return null;
+}
 function walk(mi){ return dist(mi)+" · "+mins(mi)+" min"+(mi>2.5?" (subway faster)":""); }
 SPOTS.forEach((s,i)=>{ s.id=i; s.has = s.lat!=null; if(s.has) s.mi = miles(HOTEL,s); });
 
@@ -371,7 +381,7 @@ function popup(s){
    <div class="pp-m ${cls(s.t)}"><span class="dot"></span>${esc(s.t)}${s.c?" · "+esc(s.c):""}${s.a?" · "+esc(s.a):""}${s.done?" · Done":""}</div>
    ${s.note?`<p class="pp-n">${esc(s.note)}</p>`:""}
    <div class="pp-k">${k.join("")}</div>
-   <div class="pp-a"><a href="${esc(s.url)}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(s))}" target="_blank" rel="noopener">Apple Maps</a>${s.vid?`<a href="${esc(s.vid)}" target="_blank" rel="noopener">Watch TikTok</a>`:""}</div>
+   <div class="pp-a"><a href="${esc(s.url)}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(s))}" target="_blank" rel="noopener">Apple Maps</a>${s.vid?`<a href="${esc(s.vid)}" target="_blank" rel="noopener">Watch on ${videoSite(s.vid)||"video"}</a>`:""}</div>
    <div class="pp-near"><div>Nearby</div>${near.map(([o,d])=>`<button type="button" data-go="${o.id}"><span>${esc(o.n)}</span><span>${walk(d)}</span></button>`).join("")}</div>`;
 }
 map.on("popupopen",e=>{e.popup.getElement().querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>go(+b.dataset.go)));});
@@ -538,7 +548,7 @@ function drawStreets(list){
 function addSpot(r){
   if(!r||typeof r.n!=="string"||!inNYC(+r.lat,+r.lng)) return null;
   const s={n:r.n.slice(0,120),t:TYPES.some(x=>x[0]===r.t)?r.t:"Activity",a:r.a?String(r.a):"",note:r.note?String(r.note):"",cost:null,p:null,d:null,s:null,done:null,
-    url:/^https:\/\//.test(r.url||"")?r.url:mapsUrl(+r.lat,+r.lng),vid:null,lat:+r.lat,lng:+r.lng,by:r.added_by?String(r.added_by):""};
+    url:/^https:\/\//.test(r.url||"")?r.url:mapsUrl(+r.lat,+r.lng),vid:typeof r.vid==="string"&&videoSite(r.vid)?r.vid:null,lat:+r.lat,lng:+r.lng,by:r.added_by?String(r.added_by):""};
   if(s.t==="Food"&&r.c) s.c=String(r.c);
   s.id=SPOTS.length; s.has=true; s.mi=miles(HOTEL,s); SPOTS.push(s); makeMarker(s); drawStreets(r.streets);
   if(!covered.has(cell(s.lat,s.lng))) backfill(s);
@@ -656,6 +666,8 @@ form.onsubmit=async e=>{
   if(!draftPos){ say("Set the location first: Find it, or click the map.",true); return; }
   const {lat,lng}=draftPos;
   if(!inNYC(lat,lng)){ say("That's outside the NYC area this map covers.",true); return; }
+  const vid=F.vid.value.trim();
+  if(vid&&(!videoSite(vid)||vid.length>500)){ say("The video link must be a full Instagram, YouTube or TikTok link (starting with https://).",true); F.vid.focus(); return; }
   saveBtn.disabled=true;
   let streets=null;
   if(!covered.has(cell(lat,lng))){ say("Fetching the streets around it…");
@@ -663,7 +675,7 @@ form.onsubmit=async e=>{
   say("Saving…");
   const row={n:n.slice(0,120),t:F.t.value,a:F.a.value.trim().slice(0,60)||null,c:F.t.value==="Food"?(F.c.value.trim().slice(0,40)||null):null,
     note:F.note.value.trim().slice(0,300)||null,url:pastedUrl||mapsUrl(+lat.toFixed(6),+lng.toFixed(6)),
-    lat:+lat.toFixed(6),lng:+lng.toFixed(6),added_by:F.by.value.trim().slice(0,40)||null,streets};
+    lat:+lat.toFixed(6),lng:+lng.toFixed(6),added_by:F.by.value.trim().slice(0,40)||null,vid:vid||null,streets};
   try{
     const saved=await db.add(row);
     try{ localStorage.setItem("nycspots.by",F.by.value.trim()); }catch(err){}
