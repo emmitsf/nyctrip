@@ -235,6 +235,8 @@ function miles(a,b){const R=3958.8,r=Math.PI/180,dl=(b.lat-a.lat)*r,dn=(b.lng-a.
   const h=Math.sin(dl/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
 const mins = mi => Math.max(1,Math.round(mi/3*60));
 const dist = mi => mi<1 ? Math.max(50,Math.round(mi*5280/50)*50).toLocaleString("en-US")+" ft" : mi.toFixed(1)+" mi";
+// Apple Maps opens the Maps app on iPhone/Mac and maps.apple.com elsewhere; q labels the pin at ll.
+const appleUrl = s => `https://maps.apple.com/?q=${encodeURIComponent(s.n)}&ll=${s.lat},${s.lng}`;
 function walk(mi){ return dist(mi)+" · "+mins(mi)+" min"+(mi>2.5?" (subway faster)":""); }
 SPOTS.forEach((s,i)=>{ s.id=i; s.has = s.lat!=null; if(s.has) s.mi = miles(HOTEL,s); });
 
@@ -321,7 +323,7 @@ function makeMarker(s){
 SPOTS.filter(s=>s.has).forEach(makeMarker);
 L.marker([HOTEL.lat,HOTEL.lng],{zIndexOffset:1000,title:HOTEL.n,
   icon:L.divIcon({className:"home",html:"<b></b><span>JGSTAY</span>",iconSize:[60,36],iconAnchor:[30,10]})})
-  .bindPopup(`<p class="pp-t">${HOTEL.n}</p><div class="pp-m">Home base</div><div class="pp-a"><a href="${HOTEL.url}" target="_blank" rel="noopener">Open in Google Maps</a></div>`)
+  .bindPopup(`<p class="pp-t">${HOTEL.n}</p><div class="pp-m">Home base</div><div class="pp-a"><a href="${HOTEL.url}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(HOTEL))}" target="_blank" rel="noopener">Apple Maps</a></div>`)
   .addTo(map);
 
 function popup(s){
@@ -336,7 +338,7 @@ function popup(s){
    <div class="pp-m ${cls(s.t)}"><span class="dot"></span>${esc(s.t)}${s.c?" · "+esc(s.c):""}${s.a?" · "+esc(s.a):""}${s.done?" · Done":""}</div>
    ${s.note?`<p class="pp-n">${esc(s.note)}</p>`:""}
    <div class="pp-k">${k.join("")}</div>
-   <div class="pp-a"><a href="${esc(s.url)}" target="_blank" rel="noopener">Open in Google Maps</a>${s.vid?`<a href="${esc(s.vid)}" target="_blank" rel="noopener">Watch TikTok</a>`:""}</div>
+   <div class="pp-a"><a href="${esc(s.url)}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(s))}" target="_blank" rel="noopener">Apple Maps</a>${s.vid?`<a href="${esc(s.vid)}" target="_blank" rel="noopener">Watch TikTok</a>`:""}</div>
    <div class="pp-near"><div>Nearby</div>${near.map(([o,d])=>`<button type="button" data-go="${o.id}"><span>${esc(o.n)}</span><span>${walk(d)}</span></button>`).join("")}</div>`;
 }
 map.on("popupopen",e=>{e.popup.getElement().querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>go(+b.dataset.go)));});
