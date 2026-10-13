@@ -315,6 +315,7 @@ const markers = {};
 const pinLayer = L.layerGroup().addTo(map);
 // On phones the map is only about half the screen, so a full popup would be taller than the map:
 // cap it (the rest scrolls inside the popup) so opening it doesn't push the map far away.
+const CAN_HOVER=(()=>{ try{ return matchMedia("(hover: hover) and (pointer: fine)").matches; }catch(e){ return true; } })();
 const popupMaxH=()=>innerWidth<=760?Math.max(180,Math.round(document.getElementById("map").clientHeight*.62)):undefined;
 // Opening a popup can pan the map to fit it; closing it pans back, unless the viewer moved the map meanwhile.
 let prePan=null;
@@ -324,7 +325,9 @@ map.on("popupclose",()=>{ if(prePan){ const v=prePan; prePan=null; map.setView(v
 function makeMarker(s){
   const m = L.circleMarker([s.lat,s.lng],{radius:7,className:`pin ${cls(s.t)}${s.done?" done":""}`});
   m.bindPopup(()=>popup(s),{maxWidth:290,autoPanPadding:[30,30],maxHeight:popupMaxH()});
-  m.bindTooltip(esc(s.n),{direction:"top",offset:[0,-6]});
+  // Hover labels only where there's a mouse. On iPhones a tap first fires the hover, and when that
+  // shows a label Safari swallows the tap, so the popup wouldn't open.
+  if(CAN_HOVER) m.bindTooltip(esc(s.n),{direction:"top",offset:[0,-6]});
   m.on("popupopen",()=>select(s.id,false)); m.on("popupclose",()=>select(null,false));
   markers[s.id]=m;
 }
