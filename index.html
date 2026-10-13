@@ -93,15 +93,18 @@ select{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);
 .inter{position:absolute;transform:translate(-5px,-5px);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .inter i{width:9px;height:9px;border-radius:2px;background:var(--fg);box-shadow:0 0 0 2px var(--land);flex:none}
 .inter span{font-family:var(--f-display);font-weight:700;font-size:12.5px;letter-spacing:.03em;color:var(--fg);text-shadow:0 0 2px var(--land)}
-.pin{stroke:var(--panel);stroke-width:1.5;fill-opacity:1}
-.pin.done{fill-opacity:.25}
+/* Pins are HTML markers (not SVG): the 24px box is the tap target, the dot inside is what you see. */
+.pin{display:grid;place-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.leaflet-marker-icon.pin,.leaflet-marker-icon.home{pointer-events:auto;cursor:pointer}
+.pin i{width:14px;height:14px;border-radius:50%;background:var(--c);box-shadow:0 0 0 1.5px var(--panel)}
+.pin.done i{opacity:.35}
 .t-Activity{--c:var(--c-activity);fill:var(--c-activity)}
 .t-Food{--c:var(--c-food);fill:var(--c-food)}
 .t-Cafe{--c:var(--c-cafe);fill:var(--c-cafe)}
 .t-Nightlife{--c:var(--c-night);fill:var(--c-night)}
 .t-Shopping{--c:var(--c-shop);fill:var(--c-shop)}
 .t-Other{--c:var(--c-other);fill:var(--c-other)}
-.pin.sel{stroke:var(--fg);stroke-width:3}
+.pin.sel i{width:16px;height:16px;box-shadow:0 0 0 2px var(--panel),0 0 0 4.5px var(--fg)}
 .hood{font-family:var(--f-display);font-weight:600;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--label);white-space:nowrap;pointer-events:none;text-align:center}
 .hood.water{font-style:italic;letter-spacing:.2em;font-weight:600;opacity:.85}
 .hood.boro{font-size:15px;letter-spacing:.3em}
@@ -322,18 +325,37 @@ let prePan=null;
 map.on("autopanstart",()=>{ if(!prePan) prePan={c:map.getCenter(),z:map.getZoom()}; });
 map.on("dragstart",()=>{ prePan=null; });
 map.on("popupclose",()=>{ if(prePan){ const v=prePan; prePan=null; map.setView(v.c,v.z); } });
+// Pins handle taps themselves instead of through Leaflet's click handling: in iPhone Safari, Leaflet
+// stopped passing taps to the pins once a popup had been opened and closed. The markers are created
+// non-interactive (so Leaflet ignores them) and get plain DOM listeners each time their element is added.
+function wirePin(m){
+  const el=m.getElement(); if(!el||el._wired) return; el._wired=true;
+  el.tabIndex=0; el.setAttribute("role","button");
+  let down=null;
+  el.addEventListener("pointerdown",e=>{ down=[e.clientX,e.clientY]; });
+  el.addEventListener("click",e=>{
+    e.stopPropagation();   // otherwise the map sees a map click and closes the popup again
+    if(down&&Math.hypot(e.clientX-down[0],e.clientY-down[1])>10) return;   // that was a drag
+    m.isPopupOpen()?m.closePopup():m.openPopup();
+  });
+  el.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); m.openPopup(); } });
+  if(CAN_HOVER&&m.getTooltip()){ el.addEventListener("mouseenter",()=>m.openTooltip()); el.addEventListener("mouseleave",()=>m.closeTooltip()); }
+}
 function makeMarker(s){
-  const m = L.circleMarker([s.lat,s.lng],{radius:7,className:`pin ${cls(s.t)}${s.done?" done":""}`});
+  const m = L.marker([s.lat,s.lng],{title:s.n,interactive:false,
+    icon:L.divIcon({className:`pin ${cls(s.t)}${s.done?" done":""}`,html:"<i></i>",iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-6],tooltipAnchor:[0,-8]})});
   m.bindPopup(()=>popup(s),{maxWidth:290,autoPanPadding:[30,30],maxHeight:popupMaxH()});
   // Hover labels only where there's a mouse. On iPhones a tap first fires the hover, and when that
   // shows a label Safari swallows the tap, so the popup wouldn't open.
-  if(CAN_HOVER) m.bindTooltip(esc(s.n),{direction:"top",offset:[0,-6]});
+  if(CAN_HOVER) m.bindTooltip(esc(s.n),{direction:"top"});
   m.on("popupopen",()=>select(s.id,false)); m.on("popupclose",()=>select(null,false));
+  m.on("add",()=>wirePin(m));
   markers[s.id]=m;
 }
 SPOTS.filter(s=>s.has).forEach(makeMarker);
-L.marker([HOTEL.lat,HOTEL.lng],{zIndexOffset:1000,title:HOTEL.n,
+L.marker([HOTEL.lat,HOTEL.lng],{zIndexOffset:1000,title:HOTEL.n,interactive:false,
   icon:L.divIcon({className:"home",html:"<b></b><span>JGSTAY</span>",iconSize:[60,36],iconAnchor:[30,10]})})
+  .on("add",function(){ wirePin(this); })
   .bindPopup(`<p class="pp-t">${HOTEL.n}</p><div class="pp-m">Home base</div><div class="pp-a"><a href="${HOTEL.url}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(HOTEL))}" target="_blank" rel="noopener">Apple Maps</a></div>`)
   .addTo(map);
 
@@ -425,9 +447,9 @@ function go(id){const s=SPOTS[id]; if(!s.has){window.open(s.url,"_blank");return
   setTimeout(()=>m.openPopup(),matchMedia("(prefers-reduced-motion: reduce)").matches?0:650);
   if(innerWidth<=760) document.querySelector(".mapwrap").scrollIntoView({behavior:"smooth"});}
 function select(id){
-  if(state.sel!=null&&markers[state.sel]){const el=markers[state.sel].getElement(); el&&el.classList.remove("sel");}
+  if(state.sel!=null&&markers[state.sel]){const m=markers[state.sel], el=m.getElement(); el&&el.classList.remove("sel"); m.setZIndexOffset(0);}
   state.sel=id; document.querySelectorAll(".item.on").forEach(x=>x.classList.remove("on"));
-  if(id!=null){const el=markers[id]&&markers[id].getElement(); if(el){el.classList.add("sel"); markers[id].bringToFront();}
+  if(id!=null){const el=markers[id]&&markers[id].getElement(); if(el){el.classList.add("sel"); markers[id].setZIndexOffset(500);}
     const li=document.querySelector(`.item[data-id="${id}"]`); if(li){li.classList.add("on"); if(innerWidth>760) li.scrollIntoView({block:"nearest"});}}
 }
 // ---- added spots ----
