@@ -123,6 +123,13 @@ select{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);
 .pp-a{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .pp-a a{font-size:13px;font-weight:600;text-decoration:none;padding:5px 10px;border-radius:6px;border:1px solid var(--line);color:var(--fg)}
 .pp-a a:hover{background:var(--chip)}
+.pp-a button{font:inherit;font-size:13px;font-weight:600;padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer}
+.pp-a button:hover{background:var(--chip)}
+.pp-a button.pri{background:var(--fg);color:var(--panel);border-color:var(--fg)}
+.pp-a button:disabled{opacity:.55;cursor:default}
+.pp-ed{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.pp-ed select,.pp-ed input{font:inherit;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:100%}
+.pp-ed small{font-size:12px;color:var(--muted)}
 .pp-near{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;font-size:12.5px}
 .pp-near div{color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:11px;font-weight:600;margin-bottom:3px}
 .pp-near button{all:unset;cursor:pointer;display:flex;justify-content:space-between;gap:8px;width:100%;padding:2px 0}
@@ -251,7 +258,47 @@ function videoSite(u){
   return null;
 }
 function walk(mi){ return dist(mi)+" · "+mins(mi)+" min"+(mi>2.5?" (subway faster)":""); }
-SPOTS.forEach((s,i)=>{ s.id=i; s.has = s.lat!=null; if(s.has) s.mi = miles(HOTEL,s); });
+SPOTS.forEach((s,i)=>{ s.id=i; s.has = s.lat!=null; if(s.has) s.mi = miles(HOTEL,s); if(s.c) s.c=s.c.trim(); });
+
+// ---- type & cuisine detection ----
+// First choice is what OpenStreetMap says the place is (its category and cuisine tag);
+// otherwise the cuisine is guessed from words in the name and note. Order matters: "Korean BBQ" is Korean.
+const CUISINE_WORDS=[
+  ["Japanese",/\b(ramen|sushi|omakase|udon|soba|izakaya|yakitori|tonkatsu|katsu|donburi|onigiri|japanese)\b/],
+  ["Korean",/\b(korean|k-?bbq|bibimbap|tteok\w*|topokki|bulgogi|kimchi|soondubu|pocha)\b/],
+  ["Chinese",/\b(chinese|dim ?sum|dumplings?|xiao ?long|hand[- ]pulled|szechuan|sichuan|cantonese|hot ?pot|xi'?an|skewers?|bao)\b/],
+  ["Pizza",/\b(pizza|pizzeria)\b/],
+  ["Bagels & Deli",/\b(bagels?|deli|pastrami)\b/],
+  ["Italian",/\b(italian|pasta|trattoria|osteria|ristorante|carbonara)\b/],
+  ["Mexican",/\b(mexican|tacos?|taqueria|burritos?|birria|quesadillas?)\b/],
+  ["Thai",/\b(thai|pad see ew|khao)\b/],
+  ["Vietnamese",/\b(vietnamese|pho|banh mi)\b/],
+  ["Indian",/\b(indian|curry|biryani|tandoori|masala|dosa)\b/],
+  ["Mediterranean",/\b(greek|gyros?|falafel|shawarma|mediterranean|halal)\b/],
+  ["French",/\b(french|bistro|brasserie)\b/],
+  ["Steakhouse",/\b(steak ?house)\b/],
+  ["American",/\b(burgers?|american|diner|bbq|barbecue|fried chicken|wings|brunch|breakfast)\b/]];
+const guessCuisine=text=>{ const t=String(text||"").toLowerCase(); const hit=CUISINE_WORDS.find(([,re])=>re.test(t)); return hit?hit[0]:""; };
+const OSM_CUISINE={japanese:"Japanese",sushi:"Japanese",ramen:"Japanese",udon:"Japanese",korean:"Korean",chinese:"Chinese",dumpling:"Chinese",
+  pizza:"Pizza",bagel:"Bagels & Deli",deli:"Bagels & Deli",sandwich:"Bagels & Deli",italian:"Italian",pasta:"Italian",mexican:"Mexican",tacos:"Mexican",
+  thai:"Thai",vietnamese:"Vietnamese",indian:"Indian",greek:"Mediterranean",mediterranean:"Mediterranean",middle_eastern:"Mediterranean",kebab:"Mediterranean",
+  falafel:"Mediterranean",french:"French",steak_house:"Steakhouse",american:"American",burger:"American",diner:"American",barbecue:"American",chicken:"American"};
+function cuisineFromOSM(tag){
+  const parts=String(tag||"").toLowerCase().split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+  const known=parts.find(p=>OSM_CUISINE[p]); if(known) return OSM_CUISINE[known];
+  return parts[0]?parts[0].replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()).slice(0,40):"";
+}
+function typeFromOSM(cat,type){
+  if(cat==="amenity"){
+    if(/^(restaurant|fast_food|food_court|bbq)$/.test(type)) return "Food";
+    if(/^(cafe|ice_cream)$/.test(type)) return "Cafe/Dessert";
+    if(/^(bar|pub|nightclub|biergarten)$/.test(type)) return "Nightlife";
+    if(/^(theatre|cinema|arts_centre|library|planetarium)$/.test(type)) return "Activity";
+  }
+  if(cat==="shop"){ if(/^(bakery|pastry|confectionery|chocolate|coffee|tea|ice_cream)$/.test(type)) return "Cafe/Dessert"; if(type==="deli") return "Food"; return "Shopping"; }
+  if(cat==="tourism"||cat==="leisure"||cat==="historic") return "Activity";
+  return "";
+}
 
 // ---- map ----
 const map = L.map("map",{zoomControl:true,attributionControl:false,zoomSnap:.25,zoomDelta:.75,wheelPxPerZoomLevel:120,minZoom:11,maxZoom:17});
@@ -351,14 +398,16 @@ function wirePin(m){
   el.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); m.openPopup(); } });
   if(CAN_HOVER&&m.getTooltip()){ el.addEventListener("mouseenter",()=>m.openTooltip()); el.addEventListener("mouseleave",()=>m.closeTooltip()); }
 }
+const pinIcon=s=>L.divIcon({className:`pin ${cls(s.t)}${s.done?" done":""}`,html:"<i></i>",iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-6],tooltipAnchor:[0,-8]});
 function makeMarker(s){
-  const m = L.marker([s.lat,s.lng],{title:s.n,interactive:false,
-    icon:L.divIcon({className:`pin ${cls(s.t)}${s.done?" done":""}`,html:"<i></i>",iconSize:[24,24],iconAnchor:[12,12],popupAnchor:[0,-6],tooltipAnchor:[0,-8]})});
+  const m = L.marker([s.lat,s.lng],{title:s.n,interactive:false,icon:pinIcon(s)});
   m.bindPopup(()=>popup(s),{maxWidth:290,autoPanPadding:[30,30],maxHeight:popupMaxH()});
   // Hover labels only where there's a mouse. On iPhones a tap first fires the hover, and when that
   // shows a label Safari swallows the tap, so the popup wouldn't open.
   if(CAN_HOVER) m.bindTooltip(esc(s.n),{direction:"top"});
-  m.on("popupopen",()=>select(s.id,false)); m.on("popupclose",()=>select(null,false));
+  m.on("popupopen",()=>select(s.id,false));
+  // Closing always returns the popup to its normal view, in case it was left on the edit form.
+  m.on("popupclose",()=>{ select(null,false); m.getPopup().setContent(()=>popup(s)); });
   m.on("add",()=>wirePin(m));
   markers[s.id]=m;
 }
@@ -381,10 +430,56 @@ function popup(s){
    <div class="pp-m ${cls(s.t)}"><span class="dot"></span>${esc(s.t)}${s.c?" · "+esc(s.c):""}${s.a?" · "+esc(s.a):""}${s.done?" · Done":""}</div>
    ${s.note?`<p class="pp-n">${esc(s.note)}</p>`:""}
    <div class="pp-k">${k.join("")}</div>
-   <div class="pp-a"><a href="${esc(s.url)}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(s))}" target="_blank" rel="noopener">Apple Maps</a>${s.vid?`<a href="${esc(s.vid)}" target="_blank" rel="noopener">Watch on ${videoSite(s.vid)||"video"}</a>`:""}</div>
+   <div class="pp-a"><a href="${esc(s.url)}" target="_blank" rel="noopener">Google Maps</a><a href="${esc(appleUrl(s))}" target="_blank" rel="noopener">Apple Maps</a>${s.vid?`<a href="${esc(s.vid)}" target="_blank" rel="noopener">Watch on ${videoSite(s.vid)||"video"}</a>`:""}<button type="button" data-edit="${s.id}">Edit type</button></div>
    <div class="pp-near"><div>Nearby</div>${near.map(([o,d])=>`<button type="button" data-go="${o.id}"><span>${esc(o.n)}</span><span>${walk(d)}</span></button>`).join("")}</div>`;
 }
-map.on("popupopen",e=>{e.popup.getElement().querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>go(+b.dataset.go)));});
+// The popup's edit view: change a spot's type and cuisine. In shared mode this needs the same password as adding.
+function popupEdit(s,note,err){
+  const needPw=SHARED&&!addPw, food=s.t==="Food";
+  return `<p class="pp-t">${esc(s.n)}</p>
+   <form class="pp-ed" data-ed="${s.id}" novalidate>
+     ${needPw?`<label class="fld"><span>Password</span><input name="pw" type="password" autocomplete="current-password"></label>`:""}
+     <label class="fld"><span>Type</span><select name="t">${TYPES.map(([t])=>`<option${t===s.t?" selected":""}>${t}</option>`).join("")}</select></label>
+     <label class="fld" data-cui${food?"":" hidden"}><span>Cuisine</span><input name="c" maxlength="40" list="dl-cui" value="${esc(food?(s.c||guessCuisine(s.n+" "+s.note)):"")}"></label>
+     <small data-msg class="${err?"msg err":""}">${esc(note||"")}</small>
+     <div class="pp-a"><button type="submit" class="pri">Save</button><button type="button" data-cancel="${s.id}">Cancel</button></div>
+   </form>`;
+}
+const showView=(s,html)=>{ const p=markers[s.id].getPopup(); p.setContent(html); p.update(); };
+map.on("popupopen",e=>{
+  const el=e.popup.getElement(); if(el._deleg) return; el._deleg=true;   // the same popup element is reused, so wire it once
+  el.addEventListener("click",ev=>{
+    // These swap the popup's content, which detaches the clicked button; Leaflet would then take the
+    // click for a map click and close the popup, so stop it here.
+    if(ev.target.closest("[data-go],[data-edit],[data-cancel]")) ev.stopPropagation();
+    const g=ev.target.closest("[data-go]"); if(g){ go(+g.dataset.go); return; }
+    const ed=ev.target.closest("[data-edit]"); if(ed){ const s=SPOTS[+ed.dataset.edit]; showView(s,popupEdit(s)); const f=el.querySelector(".pp-ed"); f&&(f.elements.pw||f.elements.t).focus(); return; }
+    const cx=ev.target.closest("[data-cancel]"); if(cx){ const s=SPOTS[+cx.dataset.cancel]; showView(s,popup(s)); }
+  });
+  el.addEventListener("change",ev=>{
+    const f=ev.target.closest(".pp-ed"); if(!f||ev.target.name!=="t") return;
+    const s=SPOTS[+f.dataset.ed], food=f.elements.t.value==="Food";
+    f.querySelector("[data-cui]").hidden=!food;
+    if(food&&!f.elements.c.value) f.elements.c.value=s.c||guessCuisine(s.n+" "+s.note);
+  });
+  el.addEventListener("submit",async ev=>{
+    const f=ev.target.closest(".pp-ed"); if(!f) return; ev.preventDefault();
+    const s=SPOTS[+f.dataset.ed], t=f.elements.t.value, c=t==="Food"?f.elements.c.value.trim().slice(0,40):"";
+    const pw=f.elements.pw?f.elements.pw.value:addPw;
+    if(SHARED&&!pw){ f.querySelector("[data-msg]").textContent="Enter the password."; return; }
+    f.querySelector("button[type=submit]").disabled=true; f.querySelector("[data-msg]").textContent="Saving…";
+    try{
+      await saveEdit(s,t,c||null,pw);
+      if(SHARED) setPw(pw);
+      applyEdit(s,t,c||null);
+      state.types.add(t); buildFilters(); render();   // render re-adds the marker, which closes its popup
+      markers[s.id].openPopup();
+    }catch(err){
+      if(/wrong password/i.test(err.message)) setPw("");
+      showView(s,popupEdit({...s,t,c},err.message,true));
+    }
+  });
+});
 
 // ---- filters & list ----
 const state={types:new Set(TYPES.map(t=>t[0])),area:"",q:"",sort:"area",sel:null,reach:Infinity,cuisine:""};
@@ -549,7 +644,9 @@ function addSpot(r){
   if(!r||typeof r.n!=="string"||!inNYC(+r.lat,+r.lng)) return null;
   const s={n:r.n.slice(0,120),t:TYPES.some(x=>x[0]===r.t)?r.t:"Activity",a:r.a?String(r.a):"",note:r.note?String(r.note):"",cost:null,p:null,d:null,s:null,done:null,
     url:/^https:\/\//.test(r.url||"")?r.url:mapsUrl(+r.lat,+r.lng),vid:typeof r.vid==="string"&&videoSite(r.vid)?r.vid:null,lat:+r.lat,lng:+r.lng,by:r.added_by?String(r.added_by):""};
-  if(s.t==="Food"&&r.c) s.c=String(r.c);
+  s.a=s.a.trim(); s.note=s.note.trim();
+  if(s.t==="Food"&&r.c&&String(r.c).trim()) s.c=String(r.c).trim();
+  s.added=true; if(r.id!=null) s.dbid=r.id;
   s.id=SPOTS.length; s.has=true; s.mi=miles(HOTEL,s); SPOTS.push(s); makeMarker(s); drawStreets(r.streets);
   if(!covered.has(cell(s.lat,s.lng))) backfill(s);
   return s;
@@ -568,6 +665,35 @@ async function fillNext(){
   }
   setTimeout(fillNext,1500);
 }
+// ---- edits (type & cuisine) ----
+// Added spots are changed in their own row; built-in spots (which live in this file) get an override
+// row keyed by name. Without Supabase, overrides are kept in this browser.
+const EDITS_KEY="nycspots.edits";
+const spotKey=s=>s.dbid!=null?"a:"+s.dbid:s.added?"l:"+s.lat+","+s.lng:"b:"+s.n;
+const localEdits=()=>{ try{ return JSON.parse(localStorage.getItem(EDITS_KEY)||"{}"); }catch(e){ return {}; } };
+async function saveEdit(s,t,c,pw){
+  if(!SHARED){ const all=localEdits(); all[spotKey(s)]={t,c};
+    try{ localStorage.setItem(EDITS_KEY,JSON.stringify(all)); }catch(e){ throw new Error("This browser blocked saving."); } return; }
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/edit_spot`,{method:"POST",headers:db.h(),body:JSON.stringify({pw,ref:spotKey(s),new_t:t,new_c:c})});
+  if(!r.ok){ const tx=await r.text();
+    if(/wrong password/i.test(tx)) throw new Error("Wrong password.");
+    if(r.status===404) throw new Error("Editing isn't set up in Supabase yet (see README).");
+    throw new Error("Couldn't save ("+r.status+"). "+tx.slice(0,120)); }
+}
+function applyEdit(s,t,c){
+  if(!TYPES.some(x=>x[0]===t)) return;
+  s.t=t; if(t==="Food"&&c) s.c=String(c).trim().slice(0,40); else delete s.c;
+  const m=markers[s.id]; if(m){ m.setIcon(pinIcon(s)); wirePin(m); }
+}
+async function loadEdits(){
+  let rows=[];
+  if(SHARED){ try{ const r=await fetch(`${SUPABASE_URL}/rest/v1/spot_edits?select=key,t,c`,{headers:db.h()}); if(r.ok) rows=await r.json(); }catch(e){} }
+  else rows=Object.entries(localEdits()).map(([key,v])=>({key,...v}));
+  if(!Array.isArray(rows)||!rows.length) return;
+  const byKey=new Map(SPOTS.map(s=>[spotKey(s),s]));
+  rows.forEach(e=>{ const s=e&&byKey.get(e.key); if(s) applyEdit(s,e.t,e.c); });
+  buildFilters(); render();
+}
 async function loadAdded(){
   try{ const rows=await db.list(); if(!rows.length) return; rows.forEach(addSpot); buildFilters(); render(); }
   catch(e){ console.warn(e); document.getElementById("count").textContent+=" · added spots couldn't load"; }
@@ -576,7 +702,8 @@ async function loadAdded(){
 // Place lookups use OpenStreetMap's Nominatim (limited to NYC).
 const NOM="https://nominatim.openstreetmap.org";
 async function nom(path){ const r=await fetch(NOM+path,{headers:{"Accept":"application/json"}}); if(!r.ok) throw new Error("lookup "+r.status); return r.json(); }
-const hoodOf=ad=>ad?(ad.neighbourhood||ad.quarter||ad.suburb||ad.city_district||""):"";
+// Neighborhood name for the Area field, skipping administrative names like "Manhattan Community Board 8".
+const hoodOf=ad=>ad?([ad.neighbourhood,ad.quarter,ad.suburb,ad.city_district].find(v=>v&&!/community board|district/i.test(v))||""):"";
 function nearestArea(lat,lng){ let best="",bd=.35; SPOTS.forEach(o=>{ if(o.has&&o.a){ const d=miles({lat,lng},o); if(d<bd){bd=d;best=o.a;} } }); return best; }
 function parseLatLng(v){
   const m=v.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/)||v.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)||
@@ -588,7 +715,28 @@ const addBtn=document.getElementById("addBtn"), form=document.getElementById("ad
 const addMsg=document.getElementById("addMsg"), saveBtn=document.getElementById("save"), cuiFld=document.getElementById("cuiFld");
 const listEl=document.getElementById("list"), countEl=document.getElementById("count");
 F.t.innerHTML=TYPES.map(([t])=>`<option>${t}</option>`).join("");
-F.t.onchange=()=>{ cuiFld.hidden=F.t.value!=="Food"; };
+F.t.onchange=()=>{ F.t.dataset.picked="1"; cuiFld.hidden=F.t.value!=="Food"; autoCuisine(); };
+// Type and cuisine fill themselves in from the looked-up place (and the name/note words) until the person picks their own.
+let osmCuisine="", osmType="";
+function autoType(v){ if(v&&F.t.dataset.picked!=="1"){ F.t.value=v; cuiFld.hidden=v!=="Food"; } }
+function autoCuisine(){
+  if(F.t.value!=="Food"||(F.c.value&&F.c.dataset.auto!=="1")) return;
+  const g=osmCuisine||guessCuisine(F.n.value+" "+F.note.value);
+  if(g){ F.c.value=g; F.c.dataset.auto="1"; }
+}
+// A cuisine word in the name or note ("Los Tacos", "ramen") also makes it Food, unless OSM or the person said otherwise.
+function autoFromWords(){ if(!osmType&&guessCuisine(F.n.value+" "+F.note.value)) autoType("Food"); autoCuisine(); }
+F.c.oninput=()=>{ F.c.dataset.auto=""; };
+F.n.addEventListener("input",autoFromWords); F.note.addEventListener("input",autoFromWords);
+// p: a Nominatim result, used for the area, the type (what kind of place OSM says it is) and the cuisine tag.
+function applyPlace(p,near){
+  if(!p) return;
+  if(!near) autoArea(hoodOf(p.address));
+  osmType=typeFromOSM(p.category,p.type); autoType(osmType);
+  osmCuisine=cuisineFromOSM(p.extratags&&p.extratags.cuisine);
+  if(osmCuisine&&F.c.dataset.auto==="1") F.c.value="";   // a real cuisine tag beats an earlier word guess
+  autoFromWords();
+}
 document.getElementById("shareNote").textContent = SHARED
   ? "Everyone with the link will see this spot."
   : "Saved in this browser only. To share added spots with everyone, see the README.";
@@ -599,7 +747,7 @@ F.a.oninput=()=>{ F.a.dataset.auto=""; };
 function openAdd(){ form.hidden=false; listEl.hidden=true; countEl.hidden=true; addBtn.hidden=true;
   try{ F.by.value=localStorage.getItem("nycspots.by")||""; }catch(e){}
   map.closePopup(); F.n.focus(); }
-function closeAdd(){ form.reset(); F.a.dataset.auto=""; cuiFld.hidden=true; say("");
+function closeAdd(){ form.reset(); F.a.dataset.auto=""; F.t.dataset.picked=""; F.c.dataset.auto=""; osmCuisine=""; osmType=""; cuiFld.hidden=true; say("");
   if(draft){ draft.remove(); draft=null; } draftPos=null; pastedUrl="";
   form.hidden=true; listEl.hidden=false; countEl.hidden=false; addBtn.hidden=false; addBtn.focus(); }
 // Shared mode asks for the password once per browser session before the add form opens.
@@ -621,8 +769,8 @@ gate.addEventListener("keydown",e=>{ if(e.key==="Escape") closeGate(); });
 addBtn.onclick=()=>{ (SHARED&&!addPw)?openGate():openAdd(); };
 document.getElementById("cancel").onclick=closeAdd;
 form.addEventListener("keydown",e=>{ if(e.key==="Escape") closeAdd(); });
-// addr: a Nominatim address we already have; without one, the pin's spot is looked up.
-function setPin(lat,lng,addr){
+// place: a Nominatim result we already have; without one, the pin's spot is looked up.
+function setPin(lat,lng,place){
   draftPos={lat,lng};
   if(!draft){
     draft=L.marker([lat,lng],{draggable:true,zIndexOffset:2000,keyboard:false,
@@ -632,17 +780,17 @@ function setPin(lat,lng,addr){
   if(!inNYC(lat,lng)){ say("That's outside the NYC area this map covers.",true); return; }
   say(`Pin set · ${walk(miles(HOTEL,{lat,lng}))} from hotel.`);
   const near=nearestArea(lat,lng); if(near) autoArea(near);
-  if(addr){ if(!near) autoArea(hoodOf(addr)); return; }
+  if(place){ applyPlace(place,near); return; }
   const id=++lookupId;
-  nom(`/reverse?format=jsonv2&zoom=18&addressdetails=1&lat=${lat}&lon=${lng}`).then(j=>{
+  nom(`/reverse?format=jsonv2&zoom=18&addressdetails=1&extratags=1&lat=${lat}&lon=${lng}`).then(j=>{
     if(id!==lookupId) return;
-    if(!near) autoArea(hoodOf(j.address));
     if(!F.n.value&&j.name) F.n.value=j.name;
+    applyPlace(j,near);
   }).catch(()=>{});
 }
 map.on("click",e=>{ if(!form.hidden) setPin(e.latlng.lat,e.latlng.lng); });
 async function find(){
-  const v=F.where.value.trim(); pastedUrl="";
+  const v=F.where.value.trim(); pastedUrl=""; osmType=""; osmCuisine="";
   if(!v) return say("Type an address or place name, paste a Google Maps link, or click the map.",true);
   const pm=v.match(/\/place\/([^/@?]+)/); if(pm&&!F.n.value){ try{ F.n.value=decodeURIComponent(pm[1].replace(/\+/g," ")); }catch(e){} }
   const ll=parseLatLng(v);
@@ -651,10 +799,10 @@ async function find(){
     return say("Short Google links can't be read here. Open it, copy the long URL from the address bar, or type the place name.",true);
   say("Looking it up…");
   try{
-    const [hit]=await nom("/search?format=jsonv2&addressdetails=1&limit=1&countrycodes=us&viewbox=-74.26,40.92,-73.70,40.49&bounded=1&q="+encodeURIComponent(v));
+    const [hit]=await nom("/search?format=jsonv2&addressdetails=1&extratags=1&limit=1&countrycodes=us&viewbox=-74.26,40.92,-73.70,40.49&bounded=1&q="+encodeURIComponent(v));
     if(!hit) return say("No match in NYC. Add the street or neighborhood, or click the map.",true);
     if(!F.n.value&&hit.name) F.n.value=hit.name;
-    setPin(+hit.lat,+hit.lon,hit.address||{}); map.flyTo([+hit.lat,+hit.lon],Math.max(map.getZoom(),15.5));
+    setPin(+hit.lat,+hit.lon,hit); map.flyTo([+hit.lat,+hit.lon],Math.max(map.getZoom(),15.5));
   }catch(e){ say("Lookup failed. Click the map to place the pin instead.",true); }
 }
 document.getElementById("find").onclick=find;
@@ -687,7 +835,7 @@ form.onsubmit=async e=>{
   finally{ saveBtn.disabled=false; }
 };
 
-labelsForZoom(); render(); loadAdded();
+labelsForZoom(); render(); loadAdded().then(loadEdits);
 </script>
 
 </body></html>
